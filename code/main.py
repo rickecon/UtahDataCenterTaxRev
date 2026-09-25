@@ -1,10 +1,26 @@
 """
-This file executes the main
+This file executes Utah tax revenue estimation from a data center of a given
+size.
+
+Functions:
+   get_avg_eff_proptax_rates_ut_cnty()
+   get_taxbase_ut_cnty()
+   get_dc_fmv()
+   get_annual_elec()
+   get_annual_ngas()
+   gen_series_realprop_exp()
+   gen_series_tpp_exp()
+   gen_series_elec_ann_exp()
+   gen_series_ngas_ann_exp()
+   gen_series_realprop_txbl_val()
+   gen_series_tpp_txbl_val()
+   gen_series_cnty_vars()
 """
 
 # Import packages
 from pathlib import Path
 import os
+import pickle
 import numpy as np
 import pandas as pd
 import fig_MWtoFMV as figfmv
@@ -17,11 +33,34 @@ images_dir = os.path.join(main_dir, "images")
 """
 Set parameters and ranges
 
+sales_tax_rate_state: State rate portion of state sales taxes
+sales_tax_rate_medicaid: Medicaid rate portion of state sales taxes
+sales_tax_rate_muni: Municipal rate portion of state sales taxes
+sales_tax_rate_cnty: County rate portion of state sales taxes
+sales_tax_rate_othlcl: Other local rate portion of state sales taxes
+energy_excise_tax rate: Energy excise tax rate
 dc_peak_elec_capac: Data center peak eletrical capacity (megawatts, MW)
 tpp_val_pct_of_fmv: Tangible personal property value as a percent of total fair
     market value (FMV)
 real_val_pct_of_fmv: Real property value as a percent of total fair
     market value (FMV), equals 1 - tpp_val_pct_of_fmv
+avg_eff_proptax_rate: Average effective property tax rate for a county or a
+    particular area
+num_yrs_tpp_replace: Number of years after tangible personal property
+    investment in which the data center fully replaces its tangible personal
+    property
+avg_elec_util_rate: Average electricity utilization rate of a data center
+elec_commercial_rate: Electricity cost in $/kWh
+ngas_Dth_per_day_per_MW: Natural gas dekatherms per day per megawatt
+    (Dth/(MW * day))
+ngas_commodity_rate: Commodity cost of natural gas ($/Dth)
+ngas_transport_rate: Tranportation cost of natural gas ($/Dth)
+cnty_taxbase: County
+tpp_deprec_sched: ?
+realprop_deprec_sched: ?
+tpp_top_depr_rate:
+realprop_TIF_pct: ?
+tpp_TIF_pct: ?
 """
 sales_tax_rate_state = 0.0470
 sales_tax_rate_medicaid = 0.0015
@@ -49,10 +88,6 @@ real_val_pct_of_fmv = 1.0 - tpp_val_pct_of_fmv
 avg_eff_proptax_rate = 0.01
 avg_eff_proptax_rate_min = 0.0043
 avg_eff_proptax_rate_max = 0.0151
-
-prop_tax_exemp_pct = 0.50
-prop_tax_exemp_pct = 0.00
-prop_tax_exemp_pct = 1.00
 
 num_yrs_tpp_replace = 3
 num_yrs_tpp_replace_min = 2
@@ -114,10 +149,17 @@ Define functions
 """
 
 
-def get_avg_eff_proptax_rates_ut_cnty():
+def get_avg_eff_proptax_rates_ut_cnty(data_dir=data_dir):
     """
     Get a Pandas DataFrame of the average effective property tax rate for each
-    county in Utah
+    county in Utah.
+
+    Args:
+        data_dir (string): OS independent path to the data directory
+
+    Returns:
+        df_avg_eff_proptax_rates_ut_cnty (DataFrame, 29 x 2): Average effective
+            total property tax rates by county in Utah
     """
     df_avg_eff_proptax_rates_ut_cnty = pd.read_csv(
         os.path.join(data_dir, "avg_proptax_rate_by_cnty_ut_2025.csv"),
@@ -127,10 +169,19 @@ def get_avg_eff_proptax_rates_ut_cnty():
     return df_avg_eff_proptax_rates_ut_cnty
 
 
-def get_taxbase_ut_cnty():
+def get_taxbase_ut_cnty(data_dir=data_dir):
     """
     Get a Pandas DataFrame of the measures of the tax base for each county in
-    Utah
+    Utah.
+
+    Args:
+        data_dir (string): OS independent path to the data directory
+
+    Returns:
+        df_taxbbase_ut_cnty (DataFrame, 30 x 8): Measures of the Utah tax base
+            by county broken down by locally assessed real property, locally
+            assessed personal property, centrally assessed properties, and the
+            total
     """
     df_taxbase_ut_cnty = pd.read_csv(
         os.path.join(data_dir, "utah_taxbase_2025_table_1.csv"),
@@ -147,36 +198,42 @@ def get_taxbase_ut_cnty():
     return df_taxbase_ut_cnty
 
 
-def get_dc_fmv(elec_capac):
+def get_dc_fmv(elec_capac, data_dir=data_dir):
     """
-    Calculate data center fair market value (FMV). This estimated relationship
-    between peak electrical capacity of a data center and its fair market value
-    is described in the appendix of "Introducing DataCenterAtlas.org"
+    Calculate data center fair market value ($, FMV). This estimated
+    relationship between peak electrical capacity of a data center and its fair
+    market value is described in the appendix of "Introducing
+    DataCenterAtlas.org"
     (https://econosseur.rickecon.com/p/introducing-datacenteratlas). See Figure
-    3 and Table 1 in that article and the equations that follow.
+    3 and Table 1 in that article and the equations that follow. The
+    func_params objects are estimated in the fig_MWtoFMV.py module
 
     Args:
         elec_capac (float or array_like): Peak electrical capacity of data
             center (MW)
 
     Returns:
-        fmv (float or np.ndarray): Fair market value of data center ($bil),
+        fmv (float or np.ndarray): Fair market value of data center ($),
             a float if elec_capac is a scalar, otherwise an array with the
             same shape as elec_capac
     """
     elec_capac_arr = np.asarray(elec_capac, dtype=float)
 
-    slope = 0.01001808208314903
-    intercept = -0.34960203870362627
-    exp_slope = 0.010396604326045987
-    exp_intercept = -1.0247649882273393
-    constant = -0.36147598374031653
+    func_params_dict = pickle.load(
+        open(os.path.join(data_dir, "func_params_dict.pkl"), "rb")
+    )
+
+    slope = func_params_dict["slope"]
+    intercept = func_params_dict["intercept"]
+    exp_slope = func_params_dict["exp_slope"]
+    exp_intercept = func_params_dict["exp_intercept"]
+    constant = func_params_dict["constant"]
 
     fmv = np.where(
         elec_capac_arr >= 95,
         slope * elec_capac_arr + intercept,
         np.exp(exp_slope * elec_capac_arr + exp_intercept) + constant,
-    )
+    ) * 1e9
 
     if fmv.ndim == 0:
         fmv = float(fmv)
@@ -272,8 +329,8 @@ def gen_series_elec_ann_exp(
     """
     Generate time series of annual electricity expenditure
     """
-    elec_annual = get_annual_elec(elec_capac, avg_elec_util_rate)
-    elec_ann_exp = elec_annual * elec_commercial_rate
+    elec_annual = get_annual_elec(elec_capac, avg_elec_util_rate)  # TWh/year
+    elec_ann_exp = elec_annual * elec_commercial_rate * 1e9  # $
     series_elec_ann_exp = elec_ann_exp * np.ones(num_yrs_to_frcst)
     series_elec_ann_exp[0] = 0.0
 
@@ -339,7 +396,7 @@ def gen_series_tpp_txbl_val(
     """
     Generate time series of real property taxable value
     """
-    tpp_TIF_pct_resize = np.zeros(num_yrs_to_frcst)
+    tpp_TIF_pct_resize = np.zeros(num_yrs_to_frcst - 1)
     tpp_TIF_pct_resize[:len(tpp_TIF_pct)] = tpp_TIF_pct
     tpp_TIF_pct_resize[len(tpp_TIF_pct):] = tpp_TIF_pct[-1]
     fmv = get_dc_fmv(elec_capac)
@@ -354,7 +411,7 @@ def gen_series_tpp_txbl_val(
     return series_tpp_txbl_val
 
 
-def gen_series_cnty_taxbase(
+def gen_series_cnty_vars(
     elec_capac,
     real_val_pct_of_fmv,
     realprop_TIF_pct,
@@ -364,11 +421,13 @@ def gen_series_cnty_taxbase(
     tpp_top_depr_rate,
     cnty_taxbase,
     avg_eff_proptax_rate,
+    start_year = 2027,
     num_yrs_to_frcst=25
 ):
     """
     Generate time series of county tax base
     """
+    year_vec = np.arange(start_year, start_year + num_yrs_to_frcst)
     series_realprop_txbl_val = gen_series_realprop_txbl_val(
         elec_capac,
         real_val_pct_of_fmv,
@@ -383,11 +442,70 @@ def gen_series_cnty_taxbase(
         tpp_top_depr_rate,
         num_yrs_to_frcst=num_yrs_to_frcst
     )
+    series_realprop_exp = gen_series_realprop_exp(
+        num_yrs_to_frcst=num_yrs_to_frcst,
+        elec_capac=elec_capac,
+        real_val_pct_of_fmv=real_val_pct_of_fmv
+    )
+    series_tpp_exp = gen_series_tpp_exp(
+        num_yrs_to_frcst=num_yrs_to_frcst,
+        elec_capac=elec_capac,
+        tpp_val_pct_of_fmv=tpp_val_pct_of_fmv,
+        num_yrs_tpp_replace=num_yrs_tpp_replace
+    )
+    series_realprop_TIF_pct = np.zeros(num_yrs_to_frcst)
+    series_realprop_TIF_pct[:len(realprop_TIF_pct)] = realprop_TIF_pct
+    series_realprop_TIF_pct[len(realprop_TIF_pct):] = realprop_TIF_pct[-1]
+    series_tpp_TIF_pct = np.zeros(num_yrs_to_frcst)
+    series_tpp_TIF_pct[1:len(tpp_TIF_pct) + 1] = tpp_TIF_pct
+    series_tpp_TIF_pct[len(tpp_TIF_pct) + 1:] = tpp_TIF_pct[-1]
+    series_cnty_new_growth = (
+        series_realprop_exp * (1 - series_realprop_TIF_pct)
+    )
     series_cnty_taxbase = np.zeros(num_yrs_to_frcst)
+    series_cnty_avg_eff_proptax_rate = np.zeros(num_yrs_to_frcst)
+    series_cnty_new_growth_rev = np.zeros(num_yrs_to_frcst)
+    series_cnty_tot_proptax_rev = np.zeros(num_yrs_to_frcst)
     for period in range(num_yrs_to_frcst):
-        series_cnty_taxbase[0] = cnty_taxbase
-        prior_year_proptax_rev = avg_eff_proptax_rate * series_cnty_taxbase[0]
-        cnty_new_growth_rev =
-        cnty_total_tax_rev = prior_year_proptax_rev + cnty_new_growth_rev
+        if period == 0:
+            # Assume that the prior year tax revenue in the initial year is the
+            # current year tax revenue
+            cnty_prior_yr_proptax_rev = cnty_taxbase * avg_eff_proptax_rate
+            series_cnty_taxbase[period] = cnty_taxbase
+            series_cnty_avg_eff_proptax_rate[period] = avg_eff_proptax_rate
+        else:
+            cnty_prior_yr_proptax_rev = (
+                series_cnty_tot_proptax_rev[period - 1]
+            )
+            series_cnty_taxbase[period] = (
+                series_cnty_taxbase[period - 1] +
+                series_realprop_txbl_val[period] +
+                series_tpp_txbl_val[period] - series_cnty_new_growth[period]
+            )
+            series_cnty_avg_eff_proptax_rate[period] = (
+                cnty_prior_yr_proptax_rev / series_cnty_taxbase[period]
+            )
+        series_cnty_new_growth_rev[period] = (
+            series_cnty_avg_eff_proptax_rate[period] *
+            series_cnty_new_growth[period]
+        )
+        series_cnty_tot_proptax_rev[period] = (
+            cnty_prior_yr_proptax_rev + series_cnty_new_growth_rev[period]
+        )
 
-    return series_cnty_taxbase
+    series_dict = {
+        "series_realprop_txbl_val": series_realprop_txbl_val,
+        "series_tpp_txbl_val": series_tpp_txbl_val,
+        "series_realprop_exp": series_realprop_exp,
+        "series_tpp_exp": series_tpp_exp,
+        "series_realprop_TIF_pct": series_realprop_TIF_pct,
+        "series_tpp_TIF_pct": series_tpp_TIF_pct,
+        "series_cnty_taxbase": series_cnty_taxbase,
+        "series_cnty_new_growth": series_cnty_new_growth,
+        "series_cnty_avg_eff_proptax_rate": series_cnty_avg_eff_proptax_rate,
+        "series_cnty_new_growth_rev": series_cnty_new_growth_rev,
+        "series_cnty_tot_proptax_rev": series_cnty_tot_proptax_rev,
+        "year_vec": year_vec
+    }
+
+    return series_dict

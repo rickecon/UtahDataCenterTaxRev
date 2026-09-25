@@ -4,6 +4,7 @@ fair market value.
 """
 # Import packages
 from pathlib import Path
+import pickle
 import os
 import numpy as np
 import pandas as pd
@@ -188,6 +189,18 @@ def make_mw_fmv_plot(title=True):
     FMV_pred_lin_lecut = a_lin * elec_capac_vec_lecut + b_lin
     # FMV_pred_exp1 = np.exp(a_exp1 * elec_capac_vec_lecut) + c_exp1
     FMV_pred_exp2 = np.exp(a_exp2 * elec_capac_vec_lecut + b_exp2) + c_exp2
+
+    func_params_dict = {
+        "slope": a_lin,
+        "intercept": b_lin,
+        "exp_slope": a_exp2,
+        "exp_intercept": b_exp2,
+        "constant": c_exp2
+    }
+    pickle.dump(
+        func_params_dict,
+        open(os.path.join(data_dir, "func_params_dict.pkl"), "wb")
+    )
 
     # -------------------------------------------------------------------------
     # Make figure
