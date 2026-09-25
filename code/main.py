@@ -466,6 +466,7 @@ def gen_series_cnty_vars(
     series_cnty_avg_eff_proptax_rate = np.zeros(num_yrs_to_frcst)
     series_cnty_new_growth_rev = np.zeros(num_yrs_to_frcst)
     series_cnty_tot_proptax_rev = np.zeros(num_yrs_to_frcst)
+    series_tot_realprop_taxrev = np.zeros(num_yrs_to_frcst)
     for period in range(num_yrs_to_frcst):
         if period == 0:
             # Assume that the prior year tax revenue in the initial year is the
@@ -492,7 +493,10 @@ def gen_series_cnty_vars(
         series_cnty_tot_proptax_rev[period] = (
             cnty_prior_yr_proptax_rev + series_cnty_new_growth_rev[period]
         )
-
+        series_tot_realprop_taxrev[period] = (
+            series_realprop_txbl_val[period] *
+            series_cnty_avg_eff_proptax_rate[period]
+        )
     series_dict = {
         "series_realprop_txbl_val": series_realprop_txbl_val,
         "series_tpp_txbl_val": series_tpp_txbl_val,
@@ -505,6 +509,7 @@ def gen_series_cnty_vars(
         "series_cnty_avg_eff_proptax_rate": series_cnty_avg_eff_proptax_rate,
         "series_cnty_new_growth_rev": series_cnty_new_growth_rev,
         "series_cnty_tot_proptax_rev": series_cnty_tot_proptax_rev,
+        "series_tot_realprop_taxrev": series_tot_realprop_taxrev,
         "year_vec": year_vec
     }
 
