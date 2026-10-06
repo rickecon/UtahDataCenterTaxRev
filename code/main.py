@@ -55,7 +55,7 @@ ngas_Dth_per_day_per_MW: Natural gas dekatherms per day per megawatt
     (Dth/(MW * day))
 ngas_commodity_rate: Commodity cost of natural gas ($/Dth)
 ngas_transport_rate: Tranportation cost of natural gas ($/Dth)
-cnty_taxbase: County
+cnty_taxbase: Value of the assessed county tax base in dollars
 tpp_deprec_sched: ?
 realprop_deprec_sched: ?
 tpp_top_depr_rate:
